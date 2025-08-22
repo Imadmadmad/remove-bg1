@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>حذف خلفية الصور — مجاني</title>
+  <style>
+    body{font-family:system-ui,-apple-system,"Segoe UI",Roboto;max-width:880px;margin:32px auto;padding:0 16px}
+    .card{border:1px solid #e5e7eb;border-radius:16px;padding:20px}
+    .row{display:flex;gap:16px;flex-wrap:wrap}
+    .col{flex:1 1 320px}
+    #drop{border:2px dashed #d1d5db;border-radius:16px;padding:24px;text-align:center;cursor:pointer}
+    #drop.drag{background:#f9fafb;border-color:#9ca3af}
+    button{padding:10px 16px;border-radius:9999px;border:1px solid #e5e7eb;background:#111827;color:#fff;cursor:pointer}
+    button:disabled{opacity:.6;cursor:default}
+    progress{width:100%}
+    img,canvas{max-width:100%;height:auto;border-radius:12px}
+    .hint{color:#6b7280;font-size:14px}
+  </style>
+</head>
+<body>
+  <h1>حذف خلفية الصور (مجاني)</h1>
+  <p class="hint">اختر صورة من جهازك وسيتم المعالجة داخل المتصفح — لا رفع لِخوادم خارجية.</p>
+
+  <div class="card">
+    <div id="drop">
+      <p>اسحب وأفلت صورة هنا أو</p>
+      <input id="file" type="file" accept="image/*" />
+    </div>
+    <div style="margin-top:16px">
+      <progress id="prog" max="100" value="0" hidden></progress>
+      <div id="status" class="hint"></div>
+    </div>
+  </div>
+
+  <div class="row" style="margin-top:20px">
+    <div class="col">
+      <h3>قبل</h3>
+      <img id="preview" alt="المعاينة" />
+    </div>
+    <div class="col">
+      <h3>بعد</h3>
+      <img id="result" alt="النتيجة" />
+      <div style="margin-top:12px">
+        <a id="download" download="no-bg.png"><button id="save" disabled>تحميل النتيجة</button></a>
+      </div>
+    </div>
+  </div>
+
+  <!-- نستخدم ESM من jsDelivr -->
+  <script type="module">
+    // ★ ملاحظة مهمّة: نستورد ملف ESM مباشرة من الـ CDN
+    import removeBackground from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
+
+    const fileInput = document.getElementById("file");
+    const drop = document.getElementById("drop");
+    const preview = document.getElementById("preview");
+    const resultImg = document.getElementById("result");
+    const prog = document.getElementById("prog");
+    const status = document.getElementById("status");
+    const saveBtn = document.getElementById("save");
+    const dl = document.getElementById("download");
+
+    // سحب وإفلات
+    ["dragenter","dragover"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("drag"); }));
+    ["dragleave","drop"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove("drag"); }));
+    drop.addEventListener("drop", e => {
+      const f = e.dataTransfer.files?.[0];
+      if (f) handleFile(f);
+    });
+    fileInput.addEventListener("change", e => {
+      const f = e.target.files?.[0];
+      if (f) handleFile(f);
+    });
+
+    async function handleFile(file) {
+      resetUI();
+      // معاينة
+      preview.src = URL.createObjectURL(file);
+
+      try {
+        prog.hidden = false;
+        status.textContent = "جاري التحميل والمعالجة…";
+        // بعض الأجهزة الضعيفة تحتاج تخفيض الدقّة لتفادي نفاد الذاكرة
+        const safeFile = await downscaleIfHuge(file, 2500); // أقصى بُعد 2500 بكسل
+
+        const blob = await removeBackground(safeFile, {
+          // يجعل التحميلات تتم من الـ CDN مباشرة (يتفادى أخطاء المسارات)
+          publicPath: "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/",
+          // شريط التقدّم
+          progress: (p) => {
+            prog.value = Math.round(p * 100);
+          },
+        });
+
+        const url = URL.createObjectURL(blob);
+        resultImg.src = url;
+        dl.href = url;
+        saveBtn.disabled = false;
+        status.textContent = "تمت الإزالة بنجاح.";
+      } catch (err) {
+        console.error(err);
+        status.textContent = "تعذّر تشغيل الأداة. جرّب متصفح كروم/إيدج/فايرفوكس على كمبيوتر مكتبي.";
+        alert((err && err.message) ? err.message : err);
+      } finally {
+        prog.hidden = true;
+      }
+    }
+
+    // تقليل الحجم تلقائيًا إن كانت الصورة ضخمة جدًا
+    async function downscaleIfHuge(file, maxDim=2500) {
+      const img = new Image();
+      img.src = URL.createObjectURL(file);
+      await img.decode();
+      const {width, height} = img;
+      const max = Math.max(width, height);
+      if (max <= maxDim) return file;
+
+      const scale = maxDim / max;
+      const w = Math.round(width * scale);
+      const h = Math.round(height * scale);
+      const canvas = document.createElement("canvas");
+      canvas.width = w; canvas.height = h;
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(img, 0, 0, w, h);
+      const blob = await new Promise(r => canvas.toBlob(r, "image/png", 0.92));
+      return new File([blob], file.name.replace(/\.(\w+)$/, "") + "-scaled.png", { type: "image/png" });
+    }
+
+    function resetUI() {
+      resultImg.removeAttribute("src");
+      saveBtn.disabled = true;
+      prog.value = 0;
+      status.textContent = "";
+    }
+  </script>
+</body>
+</html>
