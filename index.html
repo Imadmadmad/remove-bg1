@@ -7,27 +7,30 @@
   <style>
     body{font-family:system-ui,-apple-system,"Segoe UI",Roboto;max-width:880px;margin:32px auto;padding:0 16px}
     .card{border:1px solid #e5e7eb;border-radius:16px;padding:20px}
-    .row{display:flex;gap:16px;flex-wrap:wrap}
-    .col{flex:1 1 320px}
     #drop{border:2px dashed #d1d5db;border-radius:16px;padding:24px;text-align:center;cursor:pointer}
     #drop.drag{background:#f9fafb;border-color:#9ca3af}
+    .row{display:flex;gap:16px;flex-wrap:wrap}
+    .col{flex:1 1 320px}
     button{padding:10px 16px;border-radius:9999px;border:1px solid #e5e7eb;background:#111827;color:#fff;cursor:pointer}
-    button:disabled{opacity:.6;cursor:default}
+    button:disabled{opacity:.6;cursor:not-allowed}
+    img{max-width:100%;height:auto;border-radius:12px}
     progress{width:100%}
-    img,canvas{max-width:100%;height:auto;border-radius:12px}
     .hint{color:#6b7280;font-size:14px}
   </style>
+
+  <!-- ضروري: يفعّل COOP/COEP عبر Service Worker (يجب أن يكون من نفس الأصل) -->
+  <script src="./coi-serviceworker.min.js"></script>
 </head>
 <body>
   <h1>حذف خلفية الصور (مجاني)</h1>
-  <p class="hint">اختر صورة من جهازك وسيتم المعالجة داخل المتصفح — لا رفع لِخوادم خارجية.</p>
+  <p class="hint">اختر صورة من جهازك — كل شيء يتم داخل المتصفح.</p>
 
   <div class="card">
     <div id="drop">
-      <p>اسحب وأفلت صورة هنا أو</p>
+      <p>اسحب وأفلت صورة هنا أو اختر ملفًا:</p>
       <input id="file" type="file" accept="image/*" />
     </div>
-    <div style="margin-top:16px">
+    <div style="margin-top:12px">
       <progress id="prog" max="100" value="0" hidden></progress>
       <div id="status" class="hint"></div>
     </div>
@@ -47,91 +50,89 @@
     </div>
   </div>
 
-  <!-- نستخدم ESM من jsDelivr -->
+  <!-- استخدام ESM من jsDelivr -->
   <script type="module">
-    // ★ ملاحظة مهمّة: نستورد ملف ESM مباشرة من الـ CDN
     import removeBackground from "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/index.mjs";
 
-    const fileInput = document.getElementById("file");
-    const drop = document.getElementById("drop");
-    const preview = document.getElementById("preview");
-    const resultImg = document.getElementById("result");
-    const prog = document.getElementById("prog");
-    const status = document.getElementById("status");
-    const saveBtn = document.getElementById("save");
-    const dl = document.getElementById("download");
+    const els = {
+      file: document.getElementById("file"),
+      drop: document.getElementById("drop"),
+      preview: document.getElementById("preview"),
+      result: document.getElementById("result"),
+      prog: document.getElementById("prog"),
+      status: document.getElementById("status"),
+      save: document.getElementById("save"),
+      dl: document.getElementById("download"),
+    };
 
-    // سحب وإفلات
-    ["dragenter","dragover"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.add("drag"); }));
-    ["dragleave","drop"].forEach(t => drop.addEventListener(t, e => { e.preventDefault(); drop.classList.remove("drag"); }));
-    drop.addEventListener("drop", e => {
+    ["dragenter","dragover"].forEach(t => els.drop.addEventListener(t, e => { e.preventDefault(); els.drop.classList.add("drag"); }));
+    ["dragleave","drop"].forEach(t => els.drop.addEventListener(t, e => { e.preventDefault(); els.drop.classList.remove("drag"); }));
+    els.drop.addEventListener("drop", e => {
       const f = e.dataTransfer.files?.[0];
       if (f) handleFile(f);
     });
-    fileInput.addEventListener("change", e => {
+    els.file.addEventListener("change", e => {
       const f = e.target.files?.[0];
       if (f) handleFile(f);
     });
 
-    async function handleFile(file) {
+    async function handleFile(file){
       resetUI();
-      // معاينة
-      preview.src = URL.createObjectURL(file);
+      els.preview.src = URL.createObjectURL(file);
 
       try {
-        prog.hidden = false;
-        status.textContent = "جاري التحميل والمعالجة…";
-        // بعض الأجهزة الضعيفة تحتاج تخفيض الدقّة لتفادي نفاد الذاكرة
-        const safeFile = await downscaleIfHuge(file, 2500); // أقصى بُعد 2500 بكسل
+        els.prog.hidden = false;
+        els.status.textContent = "جاري التحميل والمعالجة…";
 
-        const blob = await removeBackground(safeFile, {
-          // يجعل التحميلات تتم من الـ CDN مباشرة (يتفادى أخطاء المسارات)
+        // تصغير تلقائي لو الصورة ضخمة
+        const safe = await downscaleIfHuge(file, 2500);
+
+        const blob = await removeBackground(safe, {
+          // نحدد مصدر ملفات النموذج والـ wasm بوضوح
           publicPath: "https://cdn.jsdelivr.net/npm/@imgly/background-removal@1.7.0/dist/",
-          // شريط التقدّم
-          progress: (p) => {
-            prog.value = Math.round(p * 100);
-          },
+          // إظهار التقدّم
+          progress: (p) => { els.prog.value = Math.round(p * 100); },
+          // بإمكانك إجبار العمل على المعالج فقط (لو واجهت مشاكل في GPU):
+          // device: 'cpu',
+          // debug: true,
         });
 
         const url = URL.createObjectURL(blob);
-        resultImg.src = url;
-        dl.href = url;
-        saveBtn.disabled = false;
-        status.textContent = "تمت الإزالة بنجاح.";
+        els.result.src = url;
+        els.dl.href = url;
+        els.save.disabled = false;
+        els.status.textContent = "تمت الإزالة بنجاح.";
       } catch (err) {
         console.error(err);
-        status.textContent = "تعذّر تشغيل الأداة. جرّب متصفح كروم/إيدج/فايرفوكس على كمبيوتر مكتبي.";
-        alert((err && err.message) ? err.message : err);
+        els.status.textContent = "تعذّر التشغيل. جرّب على كروم/فايرفوكس على كمبيوتر مكتبي.";
+        alert(err?.message || err);
       } finally {
-        prog.hidden = true;
+        els.prog.hidden = true;
       }
     }
 
-    // تقليل الحجم تلقائيًا إن كانت الصورة ضخمة جدًا
-    async function downscaleIfHuge(file, maxDim=2500) {
+    async function downscaleIfHuge(file, maxDim=2500){
       const img = new Image();
       img.src = URL.createObjectURL(file);
       await img.decode();
       const {width, height} = img;
       const max = Math.max(width, height);
       if (max <= maxDim) return file;
-
       const scale = maxDim / max;
-      const w = Math.round(width * scale);
-      const h = Math.round(height * scale);
+      const w = Math.round(width * scale), h = Math.round(height * scale);
       const canvas = document.createElement("canvas");
       canvas.width = w; canvas.height = h;
       const ctx = canvas.getContext("2d");
       ctx.drawImage(img, 0, 0, w, h);
       const blob = await new Promise(r => canvas.toBlob(r, "image/png", 0.92));
-      return new File([blob], file.name.replace(/\.(\w+)$/, "") + "-scaled.png", { type: "image/png" });
+      return new File([blob], (file.name.replace(/\.(\w+)$/, "")||"image") + "-scaled.png", { type:"image/png" });
     }
 
-    function resetUI() {
-      resultImg.removeAttribute("src");
-      saveBtn.disabled = true;
-      prog.value = 0;
-      status.textContent = "";
+    function resetUI(){
+      els.result.removeAttribute("src");
+      els.save.disabled = true;
+      els.prog.value = 0;
+      els.status.textContent = "";
     }
   </script>
 </body>
